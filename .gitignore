@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# 環境変数（秘密情報）
+.env
+
+# データベース
+chroma_db/

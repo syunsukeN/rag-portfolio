@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+chromadb
+python-dotenv
+google-generativeai
