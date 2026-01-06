@@ -132,17 +132,32 @@ def split_into_chunks(content: str, filename: str) -> List[Dict[str, Any]]:
             continue
 
         chunk_idx = len(chunks)  # 現在のチャンク数がインデックスになる
-        logger.debug(f"チャンク作成: {section_title} ({len(section_content)} 文字)")
+
+        # v2.1.1: H2見出しをチャンクの先頭に追加（見出し込み埋め込み）
+        # 理由: ベクトル検索でドメイン識別を強化するため
+        # 例: "有給休暇" という見出しが埋め込みベクトルに含まれることで、
+        #     「有給」に関するクエリで正しいセクションがヒットしやすくなる
+        #
+        # 注意: has_merged_preamble=True の場合は既にH2見出しが含まれているため
+        #       二重に追加しないようにする
+        if has_merged_preamble:
+            # Preamble結合時は既に "## section_title" が含まれている
+            content_with_header = section_content
+        else:
+            # 通常のセクション: H2見出しを先頭に追加
+            content_with_header = f"## {section_title}\n{section_content}"
+
+        logger.debug(f"チャンク作成: {section_title} ({len(content_with_header)} 文字)")
 
         chunks.append({
             "id": f"{filename_base}_{chunk_idx}",
-            "content": section_content,
+            "content": content_with_header,  # 見出し込みコンテンツ
             "metadata": {
                 "filename": filename,
                 "section_title": section_title,
                 "chunk_index": chunk_idx,
                 "chunk_count": 0,  # 後で更新
-                "char_count": len(section_content),
+                "char_count": len(content_with_header),
                 "has_preamble": bool(preamble),  # Preambleの有無
                 "has_merged_preamble": has_merged_preamble  # 短いPreambleが結合されたか
             }
