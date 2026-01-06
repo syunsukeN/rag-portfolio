@@ -1,6 +1,11 @@
 """
 RAGベースの社内資料検索AIのバックエンドAPI
 
+v2.1.0の主な変更点:
+- クエリ拡張機能の追加（LLMによる検索キーワード拡張）
+- レスポンスに expanded_query, added_keywords を追加
+- 環境変数 QUERY_EXPANSION_ENABLED で機能の有効/無効を制御可能
+
 v2.0.0の主な変更点:
 - チャンク分割対応（ドキュメント全体 → セクション単位の検索）
 - 信頼度スコア（confidence）の追加
@@ -11,6 +16,7 @@ v2.0.0の主な変更点:
 - FastAPI: RESTful API フレームワーク
 - ChromaDB: ベクトルデータベース（類似度検索）
 - Gemini API: 埋め込み生成とLLM応答生成
+- QueryExpander: クエリ拡張モジュール（v2.1.0で追加）
 """
 
 import os
@@ -22,16 +28,19 @@ import chromadb
 from chromadb.utils import embedding_functions
 import google.generativeai as genai
 
+# クエリ拡張モジュールをインポート（v2.1.0で追加）
+from query_expander import QueryExpander
+
 # .envから環境変数を読み込む
 # 必要な環境変数: CHROMA_GOOGLE_GENAI_API_KEY
 load_dotenv()
 
-# チャンク分割対応により v2.0.0 にメジャーバージョンアップ
-# 変更点: レスポンスに sections, confidence, version フィールドを追加
+# v2.1.0: クエリ拡張機能を追加
+# 変更点: レスポンスに expanded_query, added_keywords フィールドを追加
 app = FastAPI(
     title="社内資料検索AI",
-    description="RAGベースの質問応答システム - チャンク分割対応",
-    version="2.0.0"
+    description="RAGベースの質問応答システム - クエリ拡張対応",
+    version="2.1.0"
 )
 
 # CORS設定を追加（フロントエンドからのアクセスを許可）
@@ -62,6 +71,13 @@ gemini_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
 collection = chroma_client.get_or_create_collection(
     name="company_docs",
     embedding_function=gemini_ef
+)
+
+# クエリ拡張機能の初期化（v2.1.0で追加）
+# 環境変数 QUERY_EXPANSION_ENABLED=false で無効化可能
+# デフォルトは有効（true）
+query_expander = QueryExpander(
+    enabled=os.getenv("QUERY_EXPANSION_ENABLED", "true").lower() == "true"
 )
 
 
@@ -136,8 +152,8 @@ def read_root():
         curl http://localhost:8000/
     """
     return {
-        "message": "RAGポートフォリオ v2.0.0 - チャンク分割対応",
-        "version": "2.0.0",
+        "message": "RAGポートフォリオ v2.1.0 - クエリ拡張対応",
+        "version": "2.1.0",
         "endpoints": {
             "/health": "ヘルスチェック",
             "/search": "ベクトル検索のみ（LLMなし）",
@@ -153,18 +169,19 @@ def health_check():
     ヘルスチェック - システムの稼働状況を確認
 
     Returns:
-        dict: ステータスとチャンク数、バージョン
+        dict: ステータスとチャンク数、バージョン、クエリ拡張の状態
 
     使用例:
         curl http://localhost:8000/health
 
     期待される出力:
-        {"status": "ok", "total_chunks": 13, "version": "2.0.0"}
+        {"status": "ok", "total_chunks": 10, "query_expansion_enabled": true, "version": "2.1.0"}
     """
     return {
         "status": "ok",
-        "total_chunks": collection.count(),  # 期待値: 13
-        "version": "2.0.0"
+        "total_chunks": collection.count(),
+        "query_expansion_enabled": query_expander.enabled,  # v2.1.0で追加
+        "version": "2.1.0"
     }
 
 
@@ -180,6 +197,8 @@ def search_documents(question: Question):
     Returns:
         dict: 検索結果（上位3件）
             - question: 検索クエリ
+            - expanded_query: 拡張後のクエリ（v2.1.0で追加）
+            - expansion_applied: 拡張が適用されたか（v2.1.0で追加）
             - results: 検索結果リスト
                 - filename: ファイル名
                 - section: セクションタイトル
@@ -191,27 +210,37 @@ def search_documents(question: Question):
           -H "Content-Type: application/json" \
           -d '{"text": "有給休暇について"}'
 
+    v2.1.0の変更点:
+        - クエリ拡張機能の追加（LLMでドメイン固有キーワードを追加）
+        - expanded_query, expansion_applied フィールドの追加
+
     v2.0.0の変更点:
         - n_results: 2 → 3（チャンク分割により件数増加）
         - section フィールドの追加（セクションタイトル）
         - similarity_score の追加（1 - distance）
     """
-    # チャンク分割により各セクションが小さくなったため、検索件数を増やす
-    # 2 → 3 に変更: チャンク3個 ≒ 元のドキュメント1.5個分の情報量を確保
+    # ステップ1: クエリ拡張を適用（v2.1.0で追加）
+    # LLMでドメイン固有のキーワードを追加し、検索精度を向上
+    expansion_result = query_expander.expand(question.text)
+
+    # ステップ2: 拡張後のクエリでベクトル検索
+    # チャンク分割により各セクションが小さくなったため、検索件数を3に設定
     results = collection.query(
-        query_texts=[question.text],
-        n_results=3  # 取得件数を増やすことで Recall（再現率）を向上
+        query_texts=[expansion_result.expanded_query],  # 拡張後のクエリを使用
+        n_results=3
     )
 
-    # レスポンスの構築（セクション情報を含む）
+    # レスポンスの構築（クエリ拡張情報を含む）
     return {
         "question": question.text,
+        "expanded_query": expansion_result.expanded_query,  # v2.1.0で追加
+        "expansion_applied": expansion_result.expansion_applied,  # v2.1.0で追加
         "results": [
             {
                 "filename": meta["filename"],
-                "section": meta["section_title"],  # v2.0.0で追加
+                "section": meta["section_title"],
                 "content": doc,
-                "similarity_score": round(1 - dist, 3)  # 類似度（0-1、高いほど類似）
+                "similarity_score": round(1 - dist, 3)
             }
             for meta, doc, dist in zip(
                 results["metadatas"][0],
@@ -229,12 +258,13 @@ def ask_question(question: Question):
     質問応答エンドポイント - RAG（Retrieval-Augmented Generation）
 
     処理フロー:
-        1. ベクトル検索で関連チャンクを取得（上位3件）
-        2. 信頼度レベルを計算（high/medium/low）
-        3. 検索結果をコンテキストとして整形（セクション情報付き）
-        4. LLMプロンプトを構築
-        5. Gemini APIで回答を生成
-        6. 回答とメタデータ（sections, confidence）を返却
+        1. クエリ拡張（LLMでドメイン固有キーワードを追加）← v2.1.0で追加
+        2. ベクトル検索で関連チャンクを取得（上位3件）
+        3. 信頼度レベルを計算（high/medium/low）
+        4. 検索結果をコンテキストとして整形（セクション情報付き）
+        5. LLMプロンプトを構築
+        6. Gemini APIで回答を生成
+        7. 回答とメタデータを返却
 
     Args:
         question (Question): ユーザーの質問
@@ -242,11 +272,13 @@ def ask_question(question: Question):
     Returns:
         dict: 質問応答の結果
             - question: 質問文
+            - expanded_query: 拡張後のクエリ（v2.1.0で追加）
+            - added_keywords: 追加されたキーワード（v2.1.0で追加）
             - answer: LLMが生成した回答
             - sources: 参照したファイル名リスト（後方互換性）
             - sections: 詳細なセクション情報（v2.0.0で追加）
             - confidence: 信頼度レベル（v2.0.0で追加）
-            - version: APIバージョン（v2.0.0で追加）
+            - version: APIバージョン
 
     使用例:
         curl -X POST http://localhost:8000/ask \
@@ -256,14 +288,20 @@ def ask_question(question: Question):
     期待される出力:
         {
           "question": "有給休暇は何日ですか？",
+          "expanded_query": "有給休暇は何日ですか？ 有給 勤怠 休み",
+          "added_keywords": ["有給", "勤怠", "休み"],
           "answer": "...",
           "sources": ["attendance.md"],
           "sections": [
             {"filename": "attendance.md", "section_title": "有給休暇", "similarity_score": 0.85}
           ],
           "confidence": "high",
-          "version": "2.0.0"
+          "version": "2.1.0"
         }
+
+    v2.1.0の変更点:
+        - クエリ拡張機能の追加（LLMでドメイン固有キーワードを追加）
+        - expanded_query, added_keywords フィールドの追加
 
     v2.0.0の変更点:
         - n_results: 2 → 3（検索精度向上）
@@ -272,12 +310,16 @@ def ask_question(question: Question):
         - 信頼度レベルの計算
         - レスポンスに sections, confidence, version を追加
     """
-    # ステップ1: 関連チャンクを検索（説明可能性 - なぜ3件か）
-    # チャンク分割により各セクションが小さくなったため、検索件数を増やす
-    # 2 → 3 に変更: チャンク3個 ≒ 元のドキュメント1.5個分の情報量を確保
+    # ステップ0: クエリ拡張を適用（v2.1.0で追加）
+    # LLMでドメイン固有のキーワードを追加し、検索精度を向上
+    # 例: "有給の申請方法" → "有給の申請方法 有給休暇 勤怠 休み"
+    expansion_result = query_expander.expand(question.text)
+
+    # ステップ1: 拡張後のクエリで関連チャンクを検索
+    # チャンク分割により各セクションが小さくなったため、検索件数を3に設定
     results = collection.query(
-        query_texts=[question.text],
-        n_results=3  # 取得件数を増やすことで Recall（再現率）を向上
+        query_texts=[expansion_result.expanded_query],  # 拡張後のクエリを使用
+        n_results=3
     )
 
     # ステップ2: 信頼度レベルを計算
@@ -333,7 +375,7 @@ def ask_question(question: Question):
     # 後方互換性: sources はファイル名のリスト（重複除去）
     sources = list(set(meta["filename"] for meta in results["metadatas"][0]))
 
-    # 新機能: sections は詳細なセクション情報（v2.0.0で追加）
+    # sections は詳細なセクション情報（v2.0.0で追加）
     sections = [
         {
             "filename": meta["filename"],
@@ -346,9 +388,11 @@ def ask_question(question: Question):
     # レスポンス（後方互換性を保ちつつ新機能を追加）
     return {
         "question": question.text,
+        "expanded_query": expansion_result.expanded_query,  # v2.1.0で追加
+        "added_keywords": expansion_result.added_keywords,  # v2.1.0で追加
         "answer": answer,
         "sources": sources,           # 既存フィールド（後方互換性）
-        "sections": sections,          # 新フィールド（v2.0.0）
-        "confidence": confidence,      # 新フィールド（v2.0.0）
-        "version": "2.0.0"            # 新フィールド（v2.0.0）
+        "sections": sections,          # v2.0.0で追加
+        "confidence": confidence,      # v2.0.0で追加
+        "version": "2.1.0"            # バージョン更新
     }
