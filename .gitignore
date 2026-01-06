@@ -8,3 +8,6 @@ venv/
 
 # データベース
 chroma_db/
+
+# ドキュメント
+docs/
