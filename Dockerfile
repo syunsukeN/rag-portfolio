@@ -14,19 +14,12 @@ FROM python:3.11-slim
 # 作業ディレクトリを設定
 WORKDIR /app
 
-# システム依存関係をインストール
-# build-essential: chromadbのビルドに必要な場合がある
-# curl: ヘルスチェック用
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
 # 依存関係ファイルを先にコピー（Dockerキャッシュ効率化）
 COPY requirements.txt .
 
 # Pythonライブラリをインストール
 # --no-cache-dir: イメージサイズを削減
+# chromadbは最新版でホイール配布されているためbuild-essential不要
 RUN pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションコードをコピー
@@ -41,8 +34,9 @@ EXPOSE 8000
 
 # ヘルスチェック（運用時の監視用）
 # 30秒ごとに /health エンドポイントを確認
+# curlの代わりにpythonを使用（追加パッケージ不要）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 # 起動コマンド
 # --host 0.0.0.0: コンテナ外からのアクセスを許可
