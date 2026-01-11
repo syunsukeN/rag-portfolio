@@ -1,0 +1,38 @@
+# ============================================
+# RAGポートフォリオ Docker Compose設定
+# ============================================
+# 目的: 1コマンドで環境構築・起動・停止を可能にする
+#
+# 使い方:
+#   起動: docker compose up -d
+#   停止: docker compose down
+#   ログ: docker compose logs -f api
+#   DB初期化: docker compose exec -e SKIP_CONFIRMATION=true api python setup_db.py
+
+services:
+  # バックエンドAPIサーバー
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # ChromaDBデータの永続化（重要）
+      # コンテナを削除してもデータが残る
+      - ./chroma_db:/app/chroma_db
+      # ドキュメントの永続化（読み取り専用）
+      # ホスト側でdocsを編集 → コンテナに即反映
+      - ./data:/app/data:ro
+    environment:
+      # 環境変数はホストの.envから読み込む
+      - CHROMA_GOOGLE_GENAI_API_KEY=${CHROMA_GOOGLE_GENAI_API_KEY}
+      - QUERY_EXPANSION_ENABLED=${QUERY_EXPANSION_ENABLED:-true}
+    restart: unless-stopped
+    # ヘルスチェック（運用時の監視用）
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

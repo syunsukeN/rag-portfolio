@@ -1,0 +1,38 @@
+# ============================================
+# Docker ビルド除外ファイル
+# ============================================
+# 目的: 不要なファイルをイメージに含めず、ビルド高速化とセキュリティ確保
+
+# Python キャッシュ
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 仮想環境
+venv/
+.venv/
+*.egg-info/
+
+# 環境変数（秘密情報なので必ず除外）
+.env
+
+# データベース（ボリュームでマウントするため除外）
+chroma_db/
+chroma_db.backup*/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/

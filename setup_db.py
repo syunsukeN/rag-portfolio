@@ -57,11 +57,18 @@ def main():
     print("   既存のコレクションを削除し、チャンク分割方式で再構築します")
     print("   この操作は元に戻せません")
     print()
-    response = input("   続行しますか? (y/n): ")
 
-    if response.lower() != 'y':
-        print("\nキャンセルしました")
-        sys.exit(0)  # 正常終了（ユーザーの意図的なキャンセル）
+    # 環境変数でスキップ可能に（Docker/CI環境での自動実行用）
+    # SKIP_CONFIRMATION=true で確認をスキップ
+    skip_confirmation = os.getenv("SKIP_CONFIRMATION", "false").lower() == "true"
+
+    if skip_confirmation:
+        print("   (SKIP_CONFIRMATION=true のため確認をスキップ)")
+    else:
+        response = input("   続行しますか? (y/n): ")
+        if response.lower() != 'y':
+            print("\nキャンセルしました")
+            sys.exit(0)  # 正常終了（ユーザーの意図的なキャンセル）
 
     print()
 
