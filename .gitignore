@@ -8,6 +8,10 @@ venv/
 
 # データベース
 chroma_db/
+chroma_db.backup*/
+
+# macOS
+.DS_Store
 
 # ドキュメント
 docs/
