@@ -79,23 +79,27 @@ fresh:
 	@echo "🔄 完全再構築を開始します"
 	@echo "============================================"
 	@echo ""
-	@echo "📍 Step 1/5: Dockerコンテナを停止..."
+	@echo "📍 Step 1/6: Dockerコンテナを停止..."
 	-docker compose down
 	@echo ""
-	@echo "📍 Step 2/5: キャッシュを削除..."
+	@echo "📍 Step 2/6: キャッシュを削除..."
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo ""
-	@echo "📍 Step 3/5: Dockerイメージを再ビルド..."
-	docker compose build
+	@echo "📍 Step 3/6: Dockerイメージを再ビルド..."
+	docker compose build --no-cache
 	@echo ""
-	@echo "📍 Step 4/5: コンテナを起動..."
+	@echo "📍 Step 4/6: コンテナを起動..."
 	docker compose up -d
 	@echo ""
-	@echo "📍 Step 5/5: ベクトルDBを初期化..."
+	@echo "📍 Step 5/6: ベクトルDBを初期化..."
 	@echo "   (コンテナが起動するまで5秒待機)"
 	sleep 5
 	docker compose exec -e SKIP_CONFIRMATION=true api python setup_db.py
+	@echo ""
+	@echo "📍 Step 6/6: コンテナを再起動（新しいDBを読み込み）..."
+	docker compose restart api
+	sleep 3
 	@echo ""
 	@echo "============================================"
 	@echo "✅ 完全再構築が完了しました！"
@@ -117,8 +121,8 @@ rebuild:
 	@echo "📍 Step 1/3: ベクトルDBを初期化..."
 	docker compose exec -e SKIP_CONFIRMATION=true api python setup_db.py
 	@echo ""
-	@echo "📍 Step 2/3: コンテナを再起動..."
-	docker compose restart
+	@echo "📍 Step 2/3: コンテナを再起動（新しいDBを読み込み）..."
+	docker compose restart api
 	@echo ""
 	@echo "📍 Step 3/3: 起動を待機..."
 	sleep 3

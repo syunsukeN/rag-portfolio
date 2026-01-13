@@ -24,6 +24,12 @@ services:
       # ドキュメントの永続化（読み取り専用）
       # ホスト側でdocsを編集 → コンテナに即反映
       - ./data:/app/data:ro
+      # 開発用: Pythonファイルのホットリロード
+      # ホスト側で編集 → uvicornが自動検知して再起動
+      - ./main.py:/app/main.py
+      - ./chunker.py:/app/chunker.py
+      - ./query_expander.py:/app/query_expander.py
+      - ./setup_db.py:/app/setup_db.py
     environment:
       # 環境変数はホストの.envから読み込む
       - CHROMA_GOOGLE_GENAI_API_KEY=${CHROMA_GOOGLE_GENAI_API_KEY}

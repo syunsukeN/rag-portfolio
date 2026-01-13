@@ -40,4 +40,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # 起動コマンド
 # --host 0.0.0.0: コンテナ外からのアクセスを許可
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --reload: ファイル変更を検知して自動再起動（開発用）
+#   ※ボリュームマウントと組み合わせることで、再ビルド不要で変更を反映
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
