@@ -2,7 +2,7 @@
 
 業務特化型のRAG（Retrieval-Augmented Generation）システムのポートフォリオです。
 
-**現在のバージョン: v2.1.0**（チャンク分割 + クエリ拡張対応）
+**現在のバージョン: v2.2.1**（聞き返し機能 + エラーハンドリング強化）
 
 ## 🎯 このプロジェクトで示したいこと
 
@@ -13,6 +13,7 @@
 | 参照元の明示 | 回答と共に根拠となる資料名・セクション名を返却 |
 | 検索精度の向上 | チャンク分割・クエリ拡張・見出し込み埋め込み |
 | 信頼度の可視化 | 検索結果の信頼度レベル（high/medium/low）を表示 |
+| 曖昧なクエリへの対応 | 聞き返し機能で選択肢を提示（v2.2.0で追加） |
 | 実運用を想定したAPI設計 | FastAPIによるRESTful API |
 
 ## 🏗️ アーキテクチャ
@@ -36,24 +37,28 @@
 |------|------|
 | バックエンド | Python / FastAPI |
 | ベクトルDB | ChromaDB |
-| Embedding | Gemini text-embedding-004 |
+| Embedding | Gemini gemini-embedding-001（3072次元） |
 | LLM | Gemini 2.5 Flash |
 | フロントエンド | HTML / CSS / JavaScript |
+| コンテナ | Docker / Docker Compose |
 
 ## 📁 ディレクトリ構成
 
 ```text
 rag-portfolio/
-├── main.py            # FastAPIサーバー（v2.1.0）
+├── main.py            # FastAPIサーバー（v2.2.1）
 ├── setup_db.py        # ドキュメントのベクトル化
 ├── chunker.py         # チャンク分割モジュール（H2見出し単位）
 ├── query_expander.py  # クエリ拡張モジュール（LLMキーワード追加）
 ├── requirements.txt   # 依存ライブラリ
+├── Dockerfile         # Dockerイメージ定義
+├── docker-compose.yml # Docker Compose設定
+├── Makefile           # 便利コマンド集
 ├── .env.example       # 環境変数テンプレート
 ├── data/
 │   └── docs/          # 社内資料（サンプル）
 └── frontend/
-    └── index.html     # 質問UI
+    └── index.html     # 質問UI（聞き返し機能対応）
 ```
 
 ## 🚀 セットアップ
@@ -114,28 +119,43 @@ python3 -m uvicorn main:app --reload
 | 環境構築の簡素化 | Python/pipのバージョン差異を吸収 |
 | 本番想定の構成 | 実運用を見据えたコンテナ化 |
 
-### クイックスタート
+### クイックスタート（Makefileを使用）
 
 ```bash
 # 1. リポジトリをクローン
 git clone https://github.com/yourusername/rag-portfolio.git
 cd rag-portfolio
 
-# 2. 環境変数を設定
-cp .env.example .env
-# .env を編集してAPIキーを設定
-
-# 3. コンテナを起動
-docker compose up -d
-
-# 4. データベースを初期化
-docker compose exec -e SKIP_CONFIRMATION=true api python setup_db.py
-
-# 5. 動作確認
-curl http://localhost:8000/health
+# 2. 初回セットアップ（.env作成→ビルド→起動→DB初期化→ブラウザ起動）
+make init
+# ※ .envを編集してAPIキーを設定してから実行
 ```
 
-### コマンドリファレンス
+### Makefileコマンド一覧
+
+| コマンド | 説明 |
+|---------|------|
+| `make help` | コマンド一覧を表示 |
+| `make init` | 初回セットアップ（clone直後に実行） |
+| `make fresh` | 完全再構築（停止→削除→ビルド→DB初期化→起動） |
+| `make rebuild` | DB更新して再起動（Dockerは停止せず） |
+| `make test` | APIにサンプル質問を投げて動作確認 |
+| `make status` | DBの状態確認（チャンク数、ドキュメント一覧） |
+| `make shell` | コンテナ内シェルに入る |
+| `make open` | フロントエンドをブラウザで開く |
+| `make nuke` | Docker全削除（イメージ・ボリューム含む完全クリア） |
+
+### ホットリロード対応（v2.2.1）
+
+開発時の効率化のため、Pythonファイルの変更を自動検知して再起動します。
+
+| 変更対象 | 再ビルド必要？ | 理由 |
+|----------|---------------|------|
+| `main.py` など | **不要** | ボリュームマウント + uvicorn --reload |
+| `frontend/index.html` | 不要 | ブラウザで直接開いている |
+| `requirements.txt` | **必要** | 新ライブラリ追加時のみ |
+
+### 従来のdocker composeコマンド
 
 | コマンド | 説明 |
 |---------|------|
@@ -143,13 +163,13 @@ curl http://localhost:8000/health
 | `docker compose down` | 停止 |
 | `docker compose logs -f api` | ログを確認 |
 | `docker compose exec api python setup_db.py` | DB再構築（対話モード） |
-| `docker compose exec -e SKIP_CONFIRMATION=true api python setup_db.py` | DB再構築（自動モード） |
 
 ### 注意事項
 
 - `data/docs/` にMarkdownファイルがない状態でDB初期化すると失敗します
 - フロントエンドはDockerに含まれますが、ブラウザで `frontend/index.html` を直接開いて使用します
 - APIは `http://localhost:8000` でアクセス可能です
+- **Gemini APIフリープランは1日20リクエストまで**（超過時はスナックバーで通知）
 
 ---
 
@@ -170,14 +190,16 @@ curl http://localhost:8000/health
 }
 ```
 
-### レスポンス例（v2.1.0）
+### レスポンス例：通常回答（v2.2.1）
 
 ```json
 {
   "question": "有給休暇は何日もらえますか？",
   "expanded_query": "有給休暇は何日もらえますか？ 有給 勤怠 休み",
   "added_keywords": ["有給", "勤怠", "休み"],
+  "response_type": "answer",
   "answer": "入社6ヶ月後に10日付与されます。",
+  "clarification": null,
   "sources": ["attendance.md"],
   "sections": [
     {
@@ -187,14 +209,37 @@ curl http://localhost:8000/health
     }
   ],
   "confidence": "high",
-  "version": "2.1.0"
+  "version": "2.2.0"
+}
+```
+
+### レスポンス例：聞き返し（v2.2.0で追加）
+
+検索結果が曖昧な場合、LLM呼び出しをスキップして選択肢を提示します。
+
+```json
+{
+  "question": "申請方法を教えて",
+  "response_type": "clarification",
+  "answer": null,
+  "clarification": {
+    "message": "複数の関連情報が見つかりました。どちらについてお知りになりたいですか？",
+    "options": [
+      {"label": "有給休暇（勤怠管理）", "query": "有給休暇について教えてください", "filter_file": "attendance.md", "chunk_id": "attendance_1"},
+      {"label": "申請方法（経費精算）", "query": "申請方法について教えてください", "filter_file": "expense.md", "chunk_id": "expense_1"}
+    ]
+  },
+  "confidence": "medium",
+  "version": "2.2.0"
 }
 ```
 
 | フィールド | 説明 |
 |------------|------|
+| response_type | 応答タイプ（`answer` or `clarification`） |
 | expanded_query | クエリ拡張後の検索クエリ |
 | added_keywords | LLMが追加したキーワード |
+| clarification | 聞き返し情報（通常回答時はnull） |
 | sections | 参照したセクションの詳細情報 |
 | confidence | 検索結果の信頼度（high/medium/low） |
 | version | APIバージョン |
@@ -258,6 +303,31 @@ Before: 「- 有給休暇は入社6ヶ月後に10日付与されます」
 After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与されます」
 ```
 
+### 7. 聞き返し機能（v2.2.0で追加）
+
+曖昧なクエリに対してLLM呼び出しをスキップし、選択肢を提示してユーザーの意図を確認。
+
+**聞き返し判定の3条件:**
+
+| 条件 | 閾値 | 説明 |
+|------|------|------|
+| 低類似度 | < 0.8 | 検索結果の信頼度が低い |
+| 曖昧なランキング | 1位-2位の差 < 0.03 | 複数の候補が拮抗 |
+| ドメイン分散 | 3種類以上 | 異なるカテゴリにまたがる |
+
+**無限ループ防止の設計:**
+
+選択肢クリック時は `chunk_id` を使って検索をスキップし、チャンクを直接取得。これにより「検索→曖昧→聞き返し→検索→曖昧...」の無限ループを構造的に防止。
+
+### 8. エラーハンドリング（v2.2.1で追加）
+
+APIクォータ制限時にスナックバーでユーザーに通知。
+
+```
+Gemini APIフリープラン: 1日20リクエストまで
+超過時: 429 Too Many Requests → フロントエンドでスナックバー表示
+```
+
 ## ⚠️ 現在の限界点
 
 このプロジェクトは学習・ポートフォリオ目的で作成しており、以下の制限があります。
@@ -276,7 +346,7 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 
 | 課題 | 現状 | 改善案 |
 |------|------|--------|
-| 抽象的なクエリ | 正しく検索できないことがある | 聞き返しUI / クエリ分類 |
+| 抽象的なクエリ | **聞き返し機能で対応済み（v2.2.0）** | さらなる精度向上 |
 | 評価指標 | 未計測 | Recall@k / 評価用質問セット |
 | 検索精度 | ベクトル検索のみ | ハイブリッド検索（BM25 + ベクトル） |
 | チャンク戦略 | H2見出し固定 | セマンティックチャンキング |
@@ -291,6 +361,9 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 - [x] クエリ拡張機能（v2.1.0）
 - [x] 見出し込み埋め込み（v2.1.0）
 - [x] Docker化（v2.2.0）
+- [x] 聞き返し機能（v2.2.0）
+- [x] クォータエラーのスナックバー表示（v2.2.1）
+- [x] 開発時ホットリロード対応（v2.2.1）
 
 ### 短期目標
 - [ ] 評価用質問セット（20問）の作成
@@ -301,7 +374,6 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 - [ ] ハイブリッド検索の導入（BM25 + ベクトル）
 - [ ] リランキング機能（Cohere Rerank等）
 - [ ] フィードバックボタンの実装
-- [ ] 抽象的なクエリへの対応（聞き返しUI）
 
 ### 長期目標
 - [ ] ユーザー認証（Auth0/Firebase Auth）
@@ -329,7 +401,8 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 | v1.0.0 | 基本的なRAG機能 |
 | v2.0.0 | チャンク分割 + 信頼度スコア |
 | v2.1.0 | クエリ拡張 + 見出し込み埋め込み |
-| v2.2.0 | Docker化 + 運用ドキュメント整備 |
+| v2.2.0 | Docker化 + 聞き返し機能 |
+| v2.2.1 | ホットリロード + エラーハンドリング強化 |
 
 ### 3. 運用を見据えた構成
 
@@ -338,8 +411,16 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 - 構造化されたログ出力
 - 環境変数による設定の外部化
 - 非対話モード対応（CI/CD連携可能）
+- Makefileによる操作の簡素化
+- ホットリロードによる開発効率化
 
-### 4. 技術的な自己認識
+### 4. ユーザー体験への配慮
+
+- **聞き返し機能**: 曖昧なクエリに対して選択肢を提示
+- **スナックバー通知**: API制限時にユーザーフレンドリーなエラー表示
+- **無限ループ防止**: chunk_id方式による構造的な防止設計
+
+### 5. 技術的な自己認識
 
 限界点を正直に記載し、改善計画を立てている点が、実務で重要な「自己認識能力」を示しています。
 完璧なシステムではなく、「何ができて何ができないか」を明確にし、継続的に改善していく姿勢を重視しています。
