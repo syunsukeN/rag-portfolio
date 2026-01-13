@@ -242,6 +242,111 @@
             transform: translateY(-2px);
             box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         }
+
+        /* 聞き返しUI（v2.2.0で追加） */
+        .clarification-container {
+            background: #fff9e6;
+            border: 1px solid #ffd666;
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 12px;
+        }
+
+        .clarification-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .clarification-message {
+            color: #856404;
+            margin-bottom: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .clarification-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .clarification-option {
+            background: #fff;
+            border: 2px solid #4a90d9;
+            border-radius: 20px;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #4a90d9;
+            transition: all 0.2s ease;
+        }
+
+        .clarification-option:hover {
+            background: #4a90d9;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* スナックバー（v2.2.1で追加） */
+        .snackbar {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #ff4757;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            z-index: 1000;
+            opacity: 0;
+            transition: all 0.3s ease;
+            max-width: 90%;
+            width: 500px;
+        }
+
+        .snackbar.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .snackbar-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .snackbar-icon {
+            font-size: 24px;
+        }
+
+        .snackbar-title {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .snackbar-message {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .snackbar-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            opacity: 0.8;
+        }
+
+        .snackbar-close:hover {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -281,10 +386,29 @@
         </div>
     </div>
 
+    <!-- スナックバー（v2.2.1で追加） -->
+    <div id="snackbar" class="snackbar">
+        <button class="snackbar-close" onclick="hideSnackbar()">×</button>
+        <div class="snackbar-header">
+            <span class="snackbar-icon">⚠️</span>
+            <span class="snackbar-title" id="snackbar-title">エラー</span>
+        </div>
+        <div class="snackbar-message" id="snackbar-message"></div>
+    </div>
+
     <script>
         const messagesContainer = document.getElementById('messages');
         const questionInput = document.getElementById('question');
         const sendBtn = document.getElementById('sendBtn');
+
+        // ハードフィルタ用のグローバル変数（v2.2.0で追加）
+        // 聞き返しボタンクリック時に、次のリクエストで使用するfilter_fileを保持
+        let pendingFilterFile = null;
+
+        // chunk_id用のグローバル変数（v2.2.0 Solution Cで追加）
+        // 聞き返しボタンクリック時に、次のリクエストで使用するchunk_idを保持
+        // chunk_idがあると検索をスキップしてチャンクを直接取得 → 無限ループ防止
+        let pendingChunkId = null;
 
         // Enterキーで送信（Shift+Enterで改行）
         questionInput.addEventListener('keydown', function(e) {
@@ -302,6 +426,18 @@
 
         function askSampleQuestion(question) {
             questionInput.value = question;
+            pendingFilterFile = null;  // サンプル質問はフィルタなし
+            pendingChunkId = null;     // サンプル質問はchunk_idなし
+            sendMessage();
+        }
+
+        // 聞き返しボタンクリック時のハンドラ（v2.2.0で追加）
+        // filterFile: ハードフィルタ用（Solution B）
+        // chunkId: 直接取得用（Solution C）- これがあると検索スキップ → 無限ループ防止
+        function askClarificationQuestion(query, filterFile, chunkId) {
+            questionInput.value = query;
+            pendingFilterFile = filterFile || null;
+            pendingChunkId = chunkId || null;
             sendMessage();
         }
 
@@ -325,13 +461,44 @@
             sendBtn.disabled = true;
 
             try {
+                // リクエストボディを構築（v2.2.0: filter_file, chunk_id対応）
+                const requestBody = { text: question };
+                if (pendingFilterFile) {
+                    requestBody.filter_file = pendingFilterFile;
+                    console.log('[FILTER] Sending with filter:', pendingFilterFile);
+                }
+                if (pendingChunkId) {
+                    requestBody.chunk_id = pendingChunkId;
+                    console.log('[CHUNK] Sending with chunk_id:', pendingChunkId);
+                }
+
                 const response = await fetch('http://127.0.0.1:8000/ask', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ text: question })
+                    body: JSON.stringify(requestBody)
                 });
+
+                // リクエスト送信後にフィルタとchunk_idをリセット
+                pendingFilterFile = null;
+                pendingChunkId = null;
+
+                // クォータエラーのチェック（v2.2.1で追加）
+                if (response.status === 429) {
+                    const errorData = await response.json();
+                    if (errorData.error_type === 'quota_exceeded') {
+                        showSnackbar(
+                            'API利用制限に達しました',
+                            `${errorData.message}\n${errorData.detail}`,
+                            10000  // 10秒間表示
+                        );
+                        removeLoadingMessage(loadingId);
+                        sendBtn.disabled = false;
+                        questionInput.focus();
+                        return;  // 処理を中断
+                    }
+                }
 
                 if (!response.ok) {
                     throw new Error('APIエラーが発生しました');
@@ -342,8 +509,14 @@
                 // ローディングを削除
                 removeLoadingMessage(loadingId);
 
-                // アシスタントの回答を追加
-                addMessage('assistant', data.answer, data.sources);
+                // response_typeによる分岐（v2.2.0で追加）
+                if (data.response_type === 'clarification') {
+                    // 聞き返しUI
+                    addMessage('assistant', null, data.sources, data.clarification);
+                } else {
+                    // 通常回答
+                    addMessage('assistant', data.answer, data.sources);
+                }
 
             } catch (error) {
                 removeLoadingMessage(loadingId);
@@ -354,7 +527,7 @@
             }
         }
 
-        function addMessage(role, text, sources = null) {
+        function addMessage(role, text, sources = null, clarification = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
 
@@ -365,11 +538,39 @@
             const content = document.createElement('div');
             content.className = 'message-content';
 
-            const messageText = document.createElement('div');
-            messageText.className = 'message-text';
-            messageText.textContent = text;
-            content.appendChild(messageText);
+            // 通常のテキストメッセージ
+            if (text) {
+                const messageText = document.createElement('div');
+                messageText.className = 'message-text';
+                messageText.textContent = text;
+                content.appendChild(messageText);
+            }
 
+            // 聞き返しUI（v2.2.0で追加）
+            if (clarification) {
+                const clarifyDiv = document.createElement('div');
+                clarifyDiv.className = 'clarification-container';
+
+                // オプションボタンを生成（v2.2.0 Solution C: chunk_id対応）
+                const optionsHtml = clarification.options.map(opt => {
+                    // シングルクォートをエスケープ
+                    const escapedQuery = opt.query.replace(/'/g, "\\'");
+                    // filter_file と chunk_id を引数として渡す
+                    // chunk_id があれば検索スキップで直接取得 → 無限ループ防止
+                    const filterArg = opt.filter_file ? `'${opt.filter_file}'` : 'null';
+                    const chunkArg = opt.chunk_id ? `'${opt.chunk_id}'` : 'null';
+                    return `<button class="clarification-option" onclick="askClarificationQuestion('${escapedQuery}', ${filterArg}, ${chunkArg})">${opt.label}</button>`;
+                }).join('');
+
+                clarifyDiv.innerHTML = `
+                    <div class="clarification-icon">🤔</div>
+                    <div class="clarification-message">${clarification.message}</div>
+                    <div class="clarification-options">${optionsHtml}</div>
+                `;
+                content.appendChild(clarifyDiv);
+            }
+
+            // 参照資料（既存機能）
             if (sources && sources.length > 0) {
                 const sourcesDiv = document.createElement('div');
                 sourcesDiv.className = 'sources';
@@ -386,6 +587,40 @@
 
             // スクロール
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // ============================================================
+        // スナックバー関連の関数（v2.2.1で追加）
+        // ============================================================
+        let snackbarTimeout = null;
+
+        function showSnackbar(title, message, duration = 8000) {
+            const snackbar = document.getElementById('snackbar');
+            const titleEl = document.getElementById('snackbar-title');
+            const messageEl = document.getElementById('snackbar-message');
+
+            titleEl.textContent = title;
+            messageEl.textContent = message;
+            snackbar.classList.add('show');
+
+            // 前のタイムアウトをクリア
+            if (snackbarTimeout) {
+                clearTimeout(snackbarTimeout);
+            }
+
+            // 指定時間後に自動的に非表示
+            snackbarTimeout = setTimeout(() => {
+                hideSnackbar();
+            }, duration);
+        }
+
+        function hideSnackbar() {
+            const snackbar = document.getElementById('snackbar');
+            snackbar.classList.remove('show');
+            if (snackbarTimeout) {
+                clearTimeout(snackbarTimeout);
+                snackbarTimeout = null;
+            }
         }
 
         let loadingCounter = 0;

@@ -89,10 +89,12 @@ def main():
     print("🗄️  ChromaDBを初期化中...")
     chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-    # Gemini Embedding関数を設定（text-embedding-004を使用）
-    # Geminiに送信してベクトル化される（768次元ベクトル）
+    # Gemini Embedding関数を設定（gemini-embedding-001を使用）
+    # 注意: text-embedding-004 は日本語で同一ベクトルを返すバグがあるため
+    #       gemini-embedding-001 に移行（3072次元ベクトル）
+    # 参照: https://discuss.ai.google.dev/t/issue-with-text-embedding-004-returning-identical-vectors-for-specific-languages/39128
     gemini_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        model_name="models/text-embedding-004"
+        model_name="models/gemini-embedding-001"
     )
 
     # ステップ4: 既存コレクションの削除（堅牢性 - べき等性を保つ）
