@@ -47,7 +47,7 @@ def main():
         - 13チャンク（attendance:4, expense:4, it_support:5）
     """
     print("=" * 70)
-    print("RAGポートフォリオ - データベースセットアップ v2.0.0")
+    print("RAGポートフォリオ - データベースセットアップ v2.2.1")
     print("=" * 70)
     print()
 

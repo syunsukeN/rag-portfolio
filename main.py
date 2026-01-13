@@ -49,7 +49,7 @@ load_dotenv()
 app = FastAPI(
     title="社内資料検索AI",
     description="RAGベースの質問応答システム - クエリ拡張対応",
-    version="2.1.0"
+    version="2.2.1"
 )
 
 # CORS設定を追加（フロントエンドからのアクセスを許可）
@@ -434,8 +434,8 @@ def read_root():
         curl http://localhost:8000/
     """
     return {
-        "message": "RAGポートフォリオ v2.1.0 - クエリ拡張対応",
-        "version": "2.1.0",
+        "message": "RAGポートフォリオ v2.2.1 - 聞き返し機能対応",
+        "version": "2.2.1",
         "endpoints": {
             "/health": "ヘルスチェック",
             "/search": "ベクトル検索のみ（LLMなし）",
@@ -463,7 +463,7 @@ def health_check():
         "status": "ok",
         "total_chunks": collection.count(),
         "query_expansion_enabled": query_expander.enabled,  # v2.1.0で追加
-        "version": "2.1.0"
+        "version": "2.2.1"
     }
 
 
@@ -656,7 +656,7 @@ def ask_question(question: Question):
                     "similarity_score": 1.0  # 直接取得なので類似度は最高
                 }],
                 "confidence": "high",  # 直接取得なので信頼度は最高
-                "version": "2.2.0"
+                "version": "2.2.1"
             }
 
     # ============================================================
@@ -714,7 +714,7 @@ def ask_question(question: Question):
             "sources": sources,
             "sections": sections,
             "confidence": confidence,
-            "version": "2.2.0"
+            "version": "2.2.1"
         }
 
     # ステップ3: 検索結果をコンテキストとして整形（セクション情報を含む）
@@ -788,5 +788,5 @@ def ask_question(question: Question):
         "sources": sources,            # 既存フィールド（後方互換性）
         "sections": sections,          # v2.0.0で追加
         "confidence": confidence,      # v2.0.0で追加
-        "version": "2.2.0"             # バージョン更新
+        "version": "2.2.1"             # バージョン更新
     }

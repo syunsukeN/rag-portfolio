@@ -209,7 +209,7 @@ make init
     }
   ],
   "confidence": "high",
-  "version": "2.2.0"
+  "version": "2.2.1"
 }
 ```
 
@@ -230,7 +230,7 @@ make init
     ]
   },
   "confidence": "medium",
-  "version": "2.2.0"
+  "version": "2.2.1"
 }
 ```
 

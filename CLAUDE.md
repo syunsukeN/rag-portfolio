@@ -80,7 +80,7 @@ python3 -m uvicorn main:app --reload
 
 **データベースセットアップ ([setup_db.py](setup_db.py)):**
 - [data/docs/](data/docs/)からMarkdownドキュメントを読み込み
-- ベクトル化にGemini `text-embedding-004`を使用
+- ベクトル化にGemini `gemini-embedding-001`を使用
 - メタデータ（ファイル名）と共にChromaDBにベクトルを保存
 - 各ドキュメントは「チャンク分割」して保存する可能性がある
   - ※実装（chunker / setup_db）の挙動を最優先の事実とし、README/CLAUDE.mdの記述はそれに合わせること
@@ -94,7 +94,7 @@ python3 -m uvicorn main:app --reload
 ### データフロー
 
 1. **ドキュメント取り込み:** `setup_db.py` → `.md`ファイル読み込み → Gemini Embedding → ChromaDB
-2. **質問処理:** ユーザーの質問 → `/ask`エンドポイント → ChromaDBクエリ（上位2件） → Gemini LLM → 参照元付き回答
+2. **質問処理:** ユーザーの質問 → `/ask`エンドポイント → ChromaDBクエリ（上位3件） → Gemini LLM → 参照元付き回答
 3. **検索のみ:** `/search`エンドポイントはLLM処理なしで生のドキュメントチャンクを返却
 
 ### APIエンドポイント
@@ -103,16 +103,16 @@ python3 -m uvicorn main:app --reload
   - リクエスト: `{"text": "質問内容"}`
   - レスポンス: `{"question": str, "answer": str, "sources": [str]}`
 - `POST /search` - ベクトル検索のみ（LLMなし）
-  - 上位2件のドキュメントを距離スコアと共に返却
+  - 上位3件のドキュメントを距離スコアと共に返却
 - `GET /health` - ヘルスチェック
 - `GET /` - ルートエンドポイント
 
 ### 主要な設定
 
-**埋め込みモデル:** `models/text-embedding-004` (Gemini)
+**埋め込みモデル:** `models/gemini-embedding-001` (Gemini)
 **LLMモデル:** `models/gemini-2.5-flash-preview-09-2025`
 **Temperature:** 0.3（精度重視のため低く設定）
-**取得件数:** 上位2件（n_results=2）
+**取得件数:** 上位3件（n_results=3）
 
 ### プロンプトエンジニアリング
 
