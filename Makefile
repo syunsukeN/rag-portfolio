@@ -69,6 +69,9 @@ init:
 	@echo ""
 	@echo "🌐 ブラウザでフロントエンドを開きます..."
 	open frontend/index.html
+	@echo ""
+	@echo "📋 ログを表示します（Ctrl+C で終了）"
+	docker compose logs -f api
 
 # 全部やり直し（完全クリーンな状態から再構築）
 fresh:
@@ -101,6 +104,9 @@ fresh:
 	@echo ""
 	@echo "🌐 ブラウザでフロントエンドを開きます..."
 	open frontend/index.html
+	@echo ""
+	@echo "📋 ログを表示します（Ctrl+C で終了）"
+	docker compose logs -f api
 
 # DB更新して再起動（Dockerは停止せず）
 rebuild:
@@ -124,6 +130,9 @@ rebuild:
 	@echo ""
 	@echo "🌐 ブラウザでフロントエンドを開きます..."
 	open frontend/index.html
+	@echo ""
+	@echo "📋 ログを表示します（Ctrl+C で終了）"
+	docker compose logs -f api
 
 # ============================================
 # デバッグ・確認
