@@ -319,6 +319,19 @@ After:  「## 有給休暇\n- 有給休暇は入社6ヶ月後に10日付与さ�
 
 選択肢クリック時は `chunk_id` を使って検索をスキップし、チャンクを直接取得。これにより「検索→曖昧→聞き返し→検索→曖昧...」の無限ループを構造的に防止。
 
+**選択肢の順序安定化:**
+
+ドメイン（カテゴリ）の選択肢を「最高類似度順」でソート。`set()`の順序不安定問題を解消し、同じ検索結果に対して常に同じ順序の選択肢を表示。
+
+```python
+# Before: set()は実行ごとに順序が変わる可能性
+unique_domains = list(set(domains))
+
+# After: 類似度が高い順で決定的にソート
+best_sim_by_domain = {dom: max_sim for dom, max_sim in ...}
+unique_domains = sorted(best_sim_by_domain, key=lambda x: x[1], reverse=True)
+```
+
 ### 8. エラーハンドリング（v2.2.1で追加）
 
 APIクォータ制限時にスナックバーでユーザーに通知。
