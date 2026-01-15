@@ -341,7 +341,21 @@ def should_clarify(results, filter_file: Optional[str] = None) -> ClarificationR
     top_similarity = similarities[0]
     similarity_gap = similarities[0] - similarities[1] if len(similarities) > 1 else 1.0
     domains = _extract_domains(metadatas)
-    unique_domains = list(set(domains))
+
+    # ドメインごとの最高類似度でソート（再現性 + UX改善）
+    # set() は順序が不安定なため、スコア順で決定的な順序を保証
+    best_sim_by_domain = {}
+    for dom, sim in zip(domains, similarities):
+        if dom not in best_sim_by_domain or sim > best_sim_by_domain[dom]:
+            best_sim_by_domain[dom] = sim
+
+    unique_domains = [
+        dom for dom, _ in sorted(
+            best_sim_by_domain.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+    ]
 
     # 条件①: 低類似度チェック
     if top_similarity < CLARIFICATION_THRESHOLDS["min_similarity"]:
