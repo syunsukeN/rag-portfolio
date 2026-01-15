@@ -184,6 +184,142 @@ def calculate_confidence(results) -> str:
 
 
 # ============================================================
+# 出典検証機能（Citation Verification）v2.3.0で追加
+# ============================================================
+
+def verify_citation_presence(answer: str, sources: List[str]) -> Optional[dict]:
+    """
+    回答に出典（ファイル名）が含まれるかチェック
+
+    Phase 1: 出典表記の機械的チェック
+    - 「資料にない場合は拒否」がプロンプト依存だった問題を、コード側で最低限ガードする
+
+    段階判定:
+    1. *.md の完全一致 → 強いOK（citation_quality="strong"）
+    2. ベース名（attendance等）の一致 → 弱いOK（citation_quality="weak"、warning付き）
+    3. どちらもない → NG（citation_quality="none"）
+
+    追加で「出典捏造検出」も実施:
+    - 回答中に *.md があるのに sources にない → 警告
+
+    Args:
+        answer: LLMが生成した回答テキスト
+        sources: 検索結果から取得したファイル名のリスト
+
+    Returns:
+        dict: 検証結果。sources が空の場合は None を返す（検証不可）
+            - has_citation: 出典が含まれているか
+            - citation_quality: "strong" | "weak" | "none"
+            - mentioned_sources: 正しく言及された出典
+            - expected_sources: 期待される出典（sourcesそのまま）
+            - mentioned_md_files: 回答から抽出した *.md 一覧
+            - unexpected_sources: 捏造検出用（回答にあるがsourcesにない）
+            - warning: 警告メッセージ（問題がある場合）
+
+    実務での使い方:
+        - has_citation=false → confidence を1段階ダウン
+        - unexpected_sources が空でない → confidence を "low" に固定
+        - 将来的には Phase 2 でJSON形式強制、Phase 3 で数値検証を追加予定
+    """
+    # sources が空なら検証不可（聞き返しフローなど）
+    if not sources:
+        return None
+
+    import re
+
+    # 回答から *.md パターンを抽出（出典捏造検出用）
+    # 例: "attendance.md", "it_support.md" などをキャプチャ
+    mentioned_md_files = set(re.findall(r'\b[\w_-]+\.md\b', answer))
+
+    # 期待される出典（sourcesに含まれるもの）
+    expected_sources = set(sources)
+
+    # 捏造された出典（回答にあるがsourcesにない）
+    # LLMが勝手に存在しないファイル名を言及している可能性
+    unexpected_sources = mentioned_md_files - expected_sources
+
+    # 正しく言及された出典（*.md形式で完全一致）
+    mentioned_correctly = mentioned_md_files & expected_sources
+
+    # ベース名での弱い一致チェック（*.mdが見つからなかった場合のみ）
+    # 例: "attendance" が回答に含まれる場合、attendance.md を参照したと推定
+    weak_matches = []
+    if not mentioned_correctly:
+        for source in sources:
+            base_name = source.replace(".md", "")
+            # 単語境界で囲まれている場合のみマッチ（誤検知軽減）
+            # 例: "attendance" はOK、"attendances" はNG
+            if re.search(rf'\b{re.escape(base_name)}\b', answer, re.IGNORECASE):
+                weak_matches.append(source)
+
+    # 判定結果
+    has_strong_citation = len(mentioned_correctly) > 0
+    has_weak_citation = len(weak_matches) > 0
+    has_unexpected = len(unexpected_sources) > 0
+
+    # 警告メッセージの決定（優先度順）
+    warning = None
+    if has_unexpected:
+        # 最も深刻: LLMが存在しない出典を捏造している可能性
+        warning = f"回答に検索結果にない出典が含まれています: {', '.join(sorted(unexpected_sources))}"
+    elif not has_strong_citation and not has_weak_citation:
+        # 出典が全くない
+        warning = "回答に出典が含まれていません"
+    elif not has_strong_citation and has_weak_citation:
+        # 弱い一致のみ（*.md形式での明示がない）
+        warning = "出典の表記が不完全です（*.md形式での明示を推奨）"
+
+    return {
+        "has_citation": has_strong_citation or has_weak_citation,
+        "citation_quality": "strong" if has_strong_citation else ("weak" if has_weak_citation else "none"),
+        "mentioned_sources": list(mentioned_correctly) + weak_matches,
+        "expected_sources": list(expected_sources),
+        "mentioned_md_files": list(mentioned_md_files),
+        "unexpected_sources": list(unexpected_sources),
+        "warning": warning
+    }
+
+
+def adjust_confidence_by_citation(confidence: str, citation_result: Optional[dict]) -> str:
+    """
+    出典検証結果に基づいてconfidenceを調整
+
+    Args:
+        confidence: 現在の信頼度レベル ("high", "medium", "low", "none")
+        citation_result: verify_citation_presence() の戻り値
+
+    Returns:
+        str: 調整後の信頼度レベル
+
+    ルール:
+        1. citation_result が None → 調整なし（検証不可）
+        2. unexpected_sources あり（捏造検出） → "low" に固定
+        3. has_citation=false → 1段階ダウン（lowは下げ止まり）
+        4. citation_quality="weak" → 調整なし（弱い警告のみ）
+    """
+    if citation_result is None:
+        return confidence
+
+    # 捏造検出: 最も深刻なので "low" に固定
+    if citation_result.get("unexpected_sources"):
+        logger.warning(f"[CITATION] Unexpected sources detected: {citation_result['unexpected_sources']}")
+        return "low"
+
+    # 出典なし: 1段階ダウン（下げ止まり）
+    if not citation_result.get("has_citation"):
+        logger.warning("[CITATION] No citation found in answer")
+        if confidence == "high":
+            return "medium"
+        elif confidence == "medium":
+            return "low"
+        # "low" と "none" は下げ止まり
+        return confidence
+
+    # citation_quality="weak" は警告のみ（confidence維持）
+    return confidence
+
+
+# ============================================================
 # 聞き返し機能（Clarification）v2.2.0で追加
 # ============================================================
 
@@ -448,8 +584,8 @@ def read_root():
         curl http://localhost:8000/
     """
     return {
-        "message": "RAGポートフォリオ v2.2.1 - 聞き返し機能対応",
-        "version": "2.2.1",
+        "message": "RAGポートフォリオ v2.3.0 - 出典検証機能追加",
+        "version": "2.3.0",
         "endpoints": {
             "/health": "ヘルスチェック",
             "/search": "ベクトル検索のみ（LLMなし）",
@@ -471,13 +607,13 @@ def health_check():
         curl http://localhost:8000/health
 
     期待される出力:
-        {"status": "ok", "total_chunks": 10, "query_expansion_enabled": true, "version": "2.1.0"}
+        {"status": "ok", "total_chunks": 10, "query_expansion_enabled": true, "version": "2.3.0"}
     """
     return {
         "status": "ok",
         "total_chunks": collection.count(),
         "query_expansion_enabled": query_expander.enabled,  # v2.1.0で追加
-        "version": "2.2.1"
+        "version": "2.3.0"  # v2.3.0: 出典検証機能追加
     }
 
 
@@ -656,22 +792,42 @@ def ask_question(question: Question):
                 generation_config=genai.types.GenerationConfig(temperature=0.3)
             )
 
-            return {
+            answer = response.text
+            sources = [meta["filename"]]
+
+            # 出典検証（v2.3.0で追加）
+            citation_result = verify_citation_presence(answer, sources)
+            adjusted_confidence = adjust_confidence_by_citation("high", citation_result)
+
+            if citation_result:
+                logger.info(f"[CITATION] (chunk) quality={citation_result['citation_quality']}, "
+                            f"has_citation={citation_result['has_citation']}, "
+                            f"warning={citation_result['warning']}")
+
+            response_data = {
                 "question": question.text,
                 "expanded_query": question.text,  # chunk_id使用時は拡張なし
                 "added_keywords": [],
                 "response_type": "answer",
-                "answer": response.text,
+                "answer": answer,
                 "clarification": None,
-                "sources": [meta["filename"]],
+                "sources": sources,
                 "sections": [{
                     "filename": meta["filename"],
                     "section_title": meta["section_title"],
                     "similarity_score": 1.0  # 直接取得なので類似度は最高
                 }],
-                "confidence": "high",  # 直接取得なので信頼度は最高
-                "version": "2.2.1"
+                "confidence": adjusted_confidence,  # v2.3.0: 出典検証で調整
+                "version": "2.3.0"
             }
+
+            # verification フィールドを追加（v2.3.0）
+            if citation_result is not None:
+                response_data["verification"] = {
+                    "citation_presence": citation_result
+                }
+
+            return response_data
 
     # ============================================================
     # 以下は通常のフロー（chunk_id がない or 見つからなかった場合）
@@ -728,8 +884,9 @@ def ask_question(question: Question):
             "sources": sources,
             "sections": sections,
             "confidence": confidence,
-            "version": "2.2.1"
+            "version": "2.3.0"  # v2.3.0: 出典検証機能追加
         }
+        # 注: 聞き返しフローではsourcesが空の可能性があるため、verificationは追加しない
 
     # ステップ3: 検索結果をコンテキストとして整形（セクション情報を含む）
     # 各チャンクに「ファイル名 - セクション名」を明示
@@ -791,8 +948,21 @@ def ask_question(question: Question):
         for meta, dist in zip(results["metadatas"][0], results["distances"][0])
     ]
 
+    # ステップ7: 出典検証（v2.3.0で追加）
+    # 回答に出典が含まれているかをコード側でチェック
+    citation_result = verify_citation_presence(answer, sources)
+
+    # 出典検証結果に基づいて confidence を調整
+    adjusted_confidence = adjust_confidence_by_citation(confidence, citation_result)
+
+    # ログ出力（デバッグ・運用用）
+    if citation_result:
+        logger.info(f"[CITATION] quality={citation_result['citation_quality']}, "
+                    f"has_citation={citation_result['has_citation']}, "
+                    f"warning={citation_result['warning']}")
+
     # レスポンス（後方互換性を保ちつつ新機能を追加）
-    return {
+    response_data = {
         "question": question.text,
         "expanded_query": expansion_result.expanded_query,  # v2.1.0で追加
         "added_keywords": expansion_result.added_keywords,  # v2.1.0で追加
@@ -801,6 +971,14 @@ def ask_question(question: Question):
         "clarification": None,         # v2.2.0で追加（通常回答ではnull）
         "sources": sources,            # 既存フィールド（後方互換性）
         "sections": sections,          # v2.0.0で追加
-        "confidence": confidence,      # v2.0.0で追加
-        "version": "2.2.1"             # バージョン更新
+        "confidence": adjusted_confidence,  # v2.3.0: 出典検証で調整
+        "version": "2.3.0"             # バージョン更新
     }
+
+    # verification フィールドは sources が空でない場合のみ追加
+    if citation_result is not None:
+        response_data["verification"] = {
+            "citation_presence": citation_result
+        }
+
+    return response_data

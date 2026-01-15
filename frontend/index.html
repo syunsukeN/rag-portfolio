@@ -347,6 +347,28 @@
         .snackbar-close:hover {
             opacity: 1;
         }
+
+        /* 出典検証警告（v2.3.0で追加） */
+        .verification-warning {
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #856404;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .verification-warning .warning-icon {
+            flex-shrink: 0;
+        }
+
+        .verification-warning .warning-text {
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -512,10 +534,10 @@
                 // response_typeによる分岐（v2.2.0で追加）
                 if (data.response_type === 'clarification') {
                     // 聞き返しUI
-                    addMessage('assistant', null, data.sources, data.clarification);
+                    addMessage('assistant', null, data.sources, data.clarification, null);
                 } else {
-                    // 通常回答
-                    addMessage('assistant', data.answer, data.sources);
+                    // 通常回答（v2.3.0: verification追加）
+                    addMessage('assistant', data.answer, data.sources, null, data.verification);
                 }
 
             } catch (error) {
@@ -527,7 +549,7 @@
             }
         }
 
-        function addMessage(role, text, sources = null, clarification = null) {
+        function addMessage(role, text, sources = null, clarification = null, verification = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
 
@@ -544,6 +566,25 @@
                 messageText.className = 'message-text';
                 messageText.textContent = text;
                 content.appendChild(messageText);
+            }
+
+            // 出典検証警告（v2.3.0で追加）
+            // XSS対策: innerHTMLではなくtextContentを使用
+            if (verification && verification.citation_presence && verification.citation_presence.warning) {
+                const warningBadge = document.createElement('div');
+                warningBadge.className = 'verification-warning';
+
+                const warningIcon = document.createElement('span');
+                warningIcon.className = 'warning-icon';
+                warningIcon.textContent = '⚠️';
+
+                const warningText = document.createElement('span');
+                warningText.className = 'warning-text';
+                warningText.textContent = verification.citation_presence.warning;
+
+                warningBadge.appendChild(warningIcon);
+                warningBadge.appendChild(warningText);
+                content.appendChild(warningBadge);
             }
 
             // 聞き返しUI（v2.2.0で追加）
