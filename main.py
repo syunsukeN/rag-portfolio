@@ -49,7 +49,7 @@ load_dotenv()
 app = FastAPI(
     title="社内資料検索AI",
     description="RAGベースの質問応答システム - クエリ拡張対応",
-    version="2.2.1"
+    version="2.3.0"
 )
 
 # CORS設定を追加（フロントエンドからのアクセスを許可）
