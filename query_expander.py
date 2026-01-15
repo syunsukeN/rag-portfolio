@@ -31,6 +31,8 @@ print(result.added_keywords)  # ["有給休暇", "勤怠", "休み", "勤怠く�
 """
 
 import os
+import json
+import re
 import logging
 from dataclasses import dataclass
 from typing import Optional, List
@@ -133,13 +135,14 @@ class QueryExpander:
 1. 質問の意図を正確に理解し、関連するカテゴリを特定する
 2. そのカテゴリに固有のキーワードを追加する
 3. 一般的すぎるキーワード（「方法」「申請」「について」など）は追加しない
-4. キーワードはカンマ区切りで出力する
-5. キーワードのみを出力し、説明は不要
+4. **JSON配列のみを出力**。例: ["有給休暇", "勤怠", "休み"]
+5. 説明文・注釈は一切禁止
+6. 各キーワードは15文字以内の単語または短いフレーズ
 
 ## 質問
 {query}
 
-## 追加キーワード（カンマ区切り）:"""
+## 追加キーワード（JSON配列のみ）:"""
 
     def __init__(
         self,
@@ -305,32 +308,75 @@ class QueryExpander:
         """
         LLMのレスポンスからキーワードを抽出
 
-        期待するフォーマット: "keyword1, keyword2, keyword3"
+        パース戦略:
+            1. JSON配列の抽出を試みる
+            2. 失敗時は従来のカンマ方式にフォールバック
+            3. 最小ガード（箇条書き除去、括弧注釈除去、長さ制限）
 
         Args:
             response_text (str): LLMからのレスポンステキスト
 
         Returns:
             List[str]: 抽出したキーワードのリスト（最大max_keywords個）
-
-        パース戦略:
-            1. カンマで分割
-            2. 各キーワードをトリム
-            3. 空文字を除去
-            4. 最大数で制限
         """
         if not response_text:
             return []
 
-        # カンマまたは改行で分割し、各キーワードをトリム
-        raw_keywords = response_text.replace('\n', ',').split(',')
-        keywords = [kw.strip() for kw in raw_keywords if kw.strip()]
+        text = response_text.strip()
+        candidates = []
 
-        # 最大数で制限
-        keywords = keywords[:self.max_keywords]
+        # 1) JSON配列の抽出を試みる（非貪欲で最短マッチ）
+        # 貪欲だと ["a","b"]\n補足: [注意] のような場合に最後の]まで取ってしまう
+        json_match = re.search(r"\[[\s\S]*?\]", text)
+        if json_match:
+            try:
+                arr = json.loads(json_match.group(0))
+                if isinstance(arr, list):
+                    candidates = [str(x).strip() for x in arr]
+            except json.JSONDecodeError:
+                logger.debug(f"[PARSE] JSON parse failed, falling back to comma split")
 
-        logger.debug(f"Parsed keywords: {keywords}")
-        return keywords
+        # 2) フォールバック（従来方式）
+        if not candidates:
+            raw = text.replace("\n", ",")
+            raw = raw.replace("、", ",").replace("・", ",")
+            candidates = [x.strip() for x in raw.split(",") if x.strip()]
+
+        # 3) 最小ガード
+        cleaned = []
+        rejected_count = 0
+
+        for kw in candidates:
+            original_kw = kw
+
+            # 箇条書き記号除去（-, *, 1. など）
+            kw = re.sub(r"^[\-\*\d\.\)\]]+\s*", "", kw)
+
+            # クォート・角括弧除去（JSON失敗時のフォールバックで残るゴミを除去）
+            kw = re.sub(r"[\"'`\[\]]", "", kw)
+
+            # 末尾の括弧注釈除去（「勤怠（カテゴリです）」→「勤怠」）
+            kw = re.sub(r"[（(][^）)]*[）)]$", "", kw).strip()
+
+            if not kw:
+                rejected_count += 1
+                logger.debug(f"[GUARD] Rejected (empty after clean): '{original_kw}'")
+                continue
+
+            # 長さ制限（24文字）
+            if len(kw) > 24:
+                rejected_count += 1
+                logger.debug(f"[GUARD] Rejected (too long): '{kw}'")
+                continue
+
+            cleaned.append(kw)
+
+        # 集計ログ（info）
+        if rejected_count > 0:
+            logger.info(f"[GUARD] rejected={rejected_count} kept={len(cleaned)}")
+
+        logger.debug(f"Parsed keywords: {cleaned}")
+        return cleaned[:self.max_keywords]
 
 
 # 単体テスト用のメイン処理

@@ -161,6 +161,28 @@ class TestQueryExpander:
         assert len(keywords) == 2
         assert keywords == ["有給休暇", "勤怠"]
 
+    def test_parse_keywords_with_explanation(self):
+        """括弧注釈混入パターン: 括弧を除去してキーワードは残す"""
+        expander = QueryExpander()
+        response = "有給休暇, 勤怠（勤怠カテゴリです）, 休み"
+        result = expander._parse_keywords(response)
+        assert result == ["有給休暇", "勤怠", "休み"]
+
+    def test_parse_keywords_json_format(self):
+        """JSON配列が返った場合に正しくパースできる"""
+        expander = QueryExpander()
+        response = '["有給休暇", "勤怠", "休み"]'
+        result = expander._parse_keywords(response)
+        assert result == ["有給休暇", "勤怠", "休み"]
+
+    def test_parse_keywords_json_fallback(self):
+        """JSONが壊れていた場合、従来方式にフォールバック（最低限キーワードは抽出）"""
+        expander = QueryExpander()
+        response = '["有給休暇", 勤怠'  # 壊れたJSON
+        result = expander._parse_keywords(response)
+        # フォールバックでカンマ分割 → クォート除去で「有給休暇」は抽出される
+        assert "有給休暇" in result
+
     @patch('query_expander.genai.GenerativeModel')
     def test_expand_success(self, mock_model_class):
         """正常なクエリ拡張が成功する"""
